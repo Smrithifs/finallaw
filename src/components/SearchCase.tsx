@@ -3,7 +3,9 @@ import React, { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, ExternalLink, Calendar, Building, User, FileText } from "lucide-react";
+import { Loader2, ExternalLink } from "lucide-react";
+import { searchIndianKanoonCases, fetchIndianKanoonCaseText, summarizeCase, IndianKanoonCase } from "@/utils/indianKanoonApi";
+import { useGeminiKey } from "@/hooks/useGeminiKey";
 
 interface SearchCaseProps {
   searchFilters: {
@@ -18,13 +20,7 @@ interface SearchCaseProps {
   };
 }
 
-interface CaseResult {
-  tid: string;
-  title: string;
-  headline: string;
-  docsource: string;
-  docsize: number;
-}
+interface CaseResult extends IndianKanoonCase {}
 
 const SearchCase: React.FC<SearchCaseProps> = ({ searchFilters }) => {
   const [searchResults, setSearchResults] = useState<CaseResult[]>([]);
@@ -32,6 +28,7 @@ const SearchCase: React.FC<SearchCaseProps> = ({ searchFilters }) => {
   const [currentPage, setCurrentPage] = useState(0);
   const [totalFound, setTotalFound] = useState(0);
   const { toast } = useToast();
+  const { data: geminiKey } = useGeminiKey();
 
   const handleSearch = async (pageNum = 0) => {
     if (!searchFilters.keyword.trim() && !searchFilters.citation.trim() && !searchFilters.provision.trim()) {
@@ -43,34 +40,65 @@ const SearchCase: React.FC<SearchCaseProps> = ({ searchFilters }) => {
       return;
     }
 
+    if (!geminiKey) {
+      toast({
+        title: "API Key Required",
+        description: "Please configure your Gemini API key to get AI summaries.",
+        variant: "destructive"
+      });
+      return;
+    }
+
     setIsLoading(true);
     try {
-      console.log('Starting case search with filters:', searchFilters);
-      
-      // The following lines were removed as per the edit hint:
-      // const searchParams = mapSearchFilters(searchFilters);
-      // searchParams.pagenum = pageNum;
-      
-      // const response = await searchCases(searchParams);
-      
-      // if (response.docs && response.docs.length > 0) {
-      //   setSearchResults(response.docs);
-      //   setTotalFound(response.found);
-      //   setCurrentPage(pageNum);
-        
-      //   toast({
-      //     title: "Search Completed",
-      //     description: `Found ${response.found} cases matching your criteria.`
-      //   });
-      // } else {
-      //   setSearchResults([]);
-      //   setTotalFound(0);
-      //   toast({
-      //     title: "No Results",
-      //     description: "No cases found matching your search criteria. Try different keywords or filters.",
-      //     variant: "destructive"
-      //   });
-      // }
+      console.log('Starting Indian Kanoon search with filters:', searchFilters);
+
+      const filters = {
+        query: searchFilters.keyword || searchFilters.citation || searchFilters.provision,
+        act: searchFilters.provision,
+        section: searchFilters.provision,
+        yearFrom: searchFilters.yearFrom,
+        yearTo: searchFilters.yearTo,
+        caseType: searchFilters.caseType,
+        maxResults: 10,
+      };
+
+      const kanoonResults = await searchIndianKanoonCases(filters);
+
+      if (kanoonResults.length === 0) {
+        setSearchResults([]);
+        toast({
+          title: "No Results",
+          description: "No cases found on Indian Kanoon for the given query.",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Rotate results on every refresh by shuffling
+      const shuffled = kanoonResults.sort(() => 0.5 - Math.random()).slice(0, 5);
+
+      // Fetch full text and summarise
+      const enriched: CaseResult[] = [];
+      for (const caseItem of shuffled) {
+        try {
+          const fullText = await fetchIndianKanoonCaseText(caseItem.tid);
+          const { summary, ratioDecidendi, keywords } = await summarizeCase(fullText, geminiKey, caseItem.title);
+          enriched.push({ ...caseItem, aiSummary: summary, ratioDecidendi, keywords });
+        } catch (e) {
+          console.error('Error enriching case', caseItem.tid, e);
+          enriched.push({ ...caseItem });
+        }
+      }
+
+      setSearchResults(enriched);
+      setTotalFound(enriched.length);
+      setCurrentPage(0);
+
+      toast({
+        title: "Search Completed",
+        description: `Fetched ${enriched.length} cases and generated AI summaries.`
+      });
     } catch (error) {
       console.error('Search error:', error);
       setSearchResults([]);
@@ -107,11 +135,7 @@ const SearchCase: React.FC<SearchCaseProps> = ({ searchFilters }) => {
     }
   };
 
-  const formatDocSize = (size: number) => {
-    if (size < 1024) return `${size} B`;
-    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  };
+  // size formatting removed as not used anymore
 
   const openCase = (tid: string) => {
     const url = `https://indiankanoon.org/doc/${tid}/`;
@@ -164,24 +188,23 @@ const SearchCase: React.FC<SearchCaseProps> = ({ searchFilters }) => {
                     </Button>
                   </div>
                   
-                  <div className="text-sm text-gray-700 mb-3 leading-relaxed">
-                    {result.headline}
-                  </div>
-                  
-                  <div className="flex flex-wrap gap-4 text-xs text-gray-500">
-                    <div className="flex items-center gap-1">
-                      <Building className="w-3 h-3" />
-                      {result.docsource}
+                  {result.aiSummary ? (
+                    <div className="prose max-w-none text-sm mb-3">
+                      <h4 className="font-semibold mb-1">AI Generated Summary</h4>
+                      <p className="whitespace-pre-wrap">{result.aiSummary}</p>
+                      {result.ratioDecidendi && (
+                        <p className="mt-2"><strong>Ratio Decidendi:</strong> {result.ratioDecidendi}</p>
+                      )}
+                      {result.keywords && result.keywords.length > 0 && (
+                        <p className="mt-2 text-xs text-gray-600"><strong>Keywords:</strong> {result.keywords.join(', ')}</p>
+                      )}
                     </div>
-                    <div className="flex items-center gap-1">
-                      <FileText className="w-3 h-3" />
-                      {formatDocSize(result.docsize)}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-blue-600 font-mono">ID: {result.tid}</span>
-                    </div>
-                  </div>
-                </CardContent>
+                  ) : (
+                    <p className="text-sm text-gray-500">Summary not available.</p>
+                  )}
+                  <div className="text-xs text-gray-500 mt-2">ID: {result.tid}</div>
+                   </div>
+                 </CardContent>
               </Card>
             ))}
           </div>
