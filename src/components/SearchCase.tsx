@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, ExternalLink, Calendar, Building, User, FileText } from "lucide-react";
+import { Loader2, ExternalLink } from "lucide-react";
 import { searchIndianKanoonCases, fetchIndianKanoonCaseText, summarizeCase, IndianKanoonCase } from "@/utils/indianKanoonApi";
 import { useGeminiKey } from "@/hooks/useGeminiKey";
 
@@ -135,11 +135,7 @@ const SearchCase: React.FC<SearchCaseProps> = ({ searchFilters }) => {
     }
   };
 
-  const formatDocSize = (size: number) => {
-    if (size < 1024) return `${size} B`;
-    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  };
+  // size formatting removed as not used anymore
 
   const openCase = (tid: string) => {
     const url = `https://indiankanoon.org/doc/${tid}/`;
@@ -192,24 +188,23 @@ const SearchCase: React.FC<SearchCaseProps> = ({ searchFilters }) => {
                     </Button>
                   </div>
                   
-                  <div className="text-sm text-gray-700 mb-3 leading-relaxed">
-                    {result.headline}
-                  </div>
-                  
-                  <div className="flex flex-wrap gap-4 text-xs text-gray-500">
-                    <div className="flex items-center gap-1">
-                      <Building className="w-3 h-3" />
-                      {result.docsource}
+                  {result.aiSummary ? (
+                    <div className="prose max-w-none text-sm mb-3">
+                      <h4 className="font-semibold mb-1">AI Generated Summary</h4>
+                      <p className="whitespace-pre-wrap">{result.aiSummary}</p>
+                      {result.ratioDecidendi && (
+                        <p className="mt-2"><strong>Ratio Decidendi:</strong> {result.ratioDecidendi}</p>
+                      )}
+                      {result.keywords && result.keywords.length > 0 && (
+                        <p className="mt-2 text-xs text-gray-600"><strong>Keywords:</strong> {result.keywords.join(', ')}</p>
+                      )}
                     </div>
-                    <div className="flex items-center gap-1">
-                      <FileText className="w-3 h-3" />
-                      {formatDocSize(result.docsize)}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-blue-600 font-mono">ID: {result.tid}</span>
-                    </div>
-                  </div>
-                </CardContent>
+                  ) : (
+                    <p className="text-sm text-gray-500">Summary not available.</p>
+                  )}
+                  <div className="text-xs text-gray-500 mt-2">ID: {result.tid}</div>
+                   </div>
+                 </CardContent>
               </Card>
             ))}
           </div>

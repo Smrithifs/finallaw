@@ -4,6 +4,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { useNavigate } from "react-router-dom";
 import { useGeminiKey } from "@/hooks/useGeminiKey";
 import { callGeminiAPI } from "@/utils/geminiApi";
+import { searchIndianKanoonCases, fetchIndianKanoonCaseText, summarizeCase } from "@/utils/indianKanoonApi";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Upload } from "lucide-react";
 import DocumentUploader from "@/components/legal/DocumentUploader";
@@ -93,7 +94,7 @@ Please provide a comprehensive yet clear explanation suitable for legal practiti
       });
       return;
     }
-
+ 
     if (!geminiKey) {
       toast({
         title: "API Key Required",
@@ -102,44 +103,34 @@ Please provide a comprehensive yet clear explanation suitable for legal practiti
       });
       return;
     }
-
+ 
     setIsCaseLoading(true);
     try {
-      let courtFilter = "";
-      if (courtLevel && specificCourt) {
-        courtFilter = ` decided by ${specificCourt}`;
-      } else if (courtLevel) {
-        courtFilter = ` from ${courtLevel}`;
+      const filters = {
+        query: `${actName} section ${sectionNumber}`,
+        yearFrom: searchYear,
+        yearTo: searchYear,
+        caseType: courtLevel,
+        maxResults: 10,
+      } as any;
+      const cases = await searchIndianKanoonCases(filters);
+      if (cases.length === 0) {
+        setCaseResults("No matching judgments found on Indian Kanoon.");
+        return;
       }
-
-      let yearFilter = "";
-      if (searchYear) {
-        yearFilter = ` from the year ${searchYear}`;
+      const selected = cases.sort(() => 0.5 - Math.random()).slice(0, 5);
+      let combined = "";
+      for (const c of selected) {
+        try {
+          const text = await fetchIndianKanoonCaseText(c.tid);
+          const { summary } = await summarizeCase(text, geminiKey, c.title);
+          combined += `\n\n### ${c.title}\nLink: ${c.link}\n\n${summary}`;
+        } catch (e) {
+          combined += `\n\n### ${c.title}\nLink: ${c.link}\nSummary unavailable.`;
+        }
       }
-
-      const prompt = `You are a legal research assistant specializing in Indian case law. Find relevant cases that have cited or interpreted Section ${sectionNumber} of the ${actName}.
-
-Search for Indian case law${courtFilter}${yearFilter} that has cited, interpreted, or applied Section ${sectionNumber} of the ${actName}.
-
-Please provide:
-
-📊 **CASE SUMMARY:** Overview of relevant cases found
-📜 **SECTION INTERPRETATION:** How the section was interpreted or applied in cases
-⚖️ **JUDICIAL OBSERVATIONS:** Key judicial observations about this section
-🏛️ **PRECEDENTS ESTABLISHED:** Any significant precedents established
-📈 **CURRENT LEGAL POSITION:** Current legal position based on these cases
-🔍 **PRACTICAL INSIGHTS:** How this section is applied in practice
-
-Focus on cases that specifically deal with Section ${sectionNumber} of the ${actName}.`;
-
-      console.log('Calling Gemini API for case analysis');
-      const result = await callGeminiAPI(prompt, geminiKey);
-
-      setCaseResults(result);
-      toast({
-        title: "Case Search Complete",
-        description: "Case analysis generated using AI knowledge"
-      });
+      setCaseResults(combined);
+      toast({ title: "Case Fetch Complete", description: "Retrieved cases and generated summaries." });
     } catch (error) {
       console.error('Error searching cases:', error);
       toast({

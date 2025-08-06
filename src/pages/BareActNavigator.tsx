@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
 import { useGeminiKey } from "@/hooks/useGeminiKey";
 import { callGeminiAPI } from "@/utils/geminiApi";
+import { searchIndianKanoonCases, fetchIndianKanoonCaseText, summarizeCase } from "@/utils/indianKanoonApi";
 
 const BareActNavigator = () => {
   const navigate = useNavigate();
@@ -121,37 +122,35 @@ Structure this as a navigation guide for legal practitioners.`;
 
     setIsCaseLoading(true);
     try {
-      let courtFilter = "";
-      if (courtLevel && specificCourt) {
-        courtFilter = ` decided by ${specificCourt}`;
-      } else if (courtLevel) {
-        courtFilter = ` from ${courtLevel}`;
+      // Build filters for Indian Kanoon search
+      const filters = {
+        query: `${actName} section ${sectionNumber}`,
+        yearFrom: searchYear,
+        yearTo: searchYear,
+        caseType: courtLevel,
+        maxResults: 10,
+      } as any;
+
+      const cases = await searchIndianKanoonCases(filters);
+      if (cases.length === 0) {
+        setCaseResults("No matching judgments found on Indian Kanoon.");
+        return;
       }
-
-      let yearFilter = "";
-      if (searchYear) {
-        yearFilter = ` from the year ${searchYear}`;
+      const selected = cases.sort(() => 0.5 - Math.random()).slice(0, 5);
+      let combinedOutput = "";
+      for (const c of selected) {
+        try {
+          const text = await fetchIndianKanoonCaseText(c.tid);
+          const { summary } = await summarizeCase(text, geminiKey, c.title);
+          combinedOutput += `\n\n### ${c.title}\nLink: ${c.link}\n\n${summary}`;
+        } catch (e) {
+          combinedOutput += `\n\n### ${c.title}\nLink: ${c.link}\nSummary unavailable.`;
+        }
       }
-
-      const prompt = `You are a legal research assistant specializing in Indian case law. Find relevant cases that have cited or interpreted Section ${sectionNumber} of the ${actName}.
-
-Search for Indian case law${courtFilter}${yearFilter} that has cited, interpreted, or applied Section ${sectionNumber} of the ${actName}.
-
-Please provide:
-1. Case names with full citations
-2. How the section was interpreted or applied in each case
-3. Key judicial observations about this section
-4. Significant precedents established
-5. Current legal position based on these cases
-
-Focus on cases that specifically deal with Section ${sectionNumber} of the ${actName}.`;
-
-      const result = await callGeminiAPI(prompt, geminiKey);
-
-      setCaseResults(result);
+      setCaseResults(combinedOutput);
       toast({
-        title: "Case Search Complete",
-        description: "Case analysis generated using AI research"
+        title: "Case Fetch Complete",
+        description: "Retrieved cases and generated summaries."
       });
     } catch (error) {
       console.error('Error searching cases:', error);
