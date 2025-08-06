@@ -43,18 +43,6 @@ const features: { title: string; href: string; description: string; icon: React.
     icon: <Search className="w-5 h-5" />,
   },
   {
-    title: "Deadline Tracker",
-    href: "/hearing-tracker",
-    description: "Track hearings with calendar view",
-    icon: <Calendar className="w-5 h-5" />,
-  },
-  {
-    title: "Voice Dictation → Legal Format",
-    href: "/voice-dictation",
-    description: "Convert voice notes to court-ready drafts",
-    icon: <Mic className="w-5 h-5" />,
-  },
-  {
     title: "NyayaBot Q&A",
     href: "/legal-qna",
     description: "Ask legal questions based on Indian law",
