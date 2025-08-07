@@ -5,9 +5,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Search, Filter, ChevronDown, ChevronUp, Database, Brain } from "lucide-react";
+import { Loader2, Search, Filter, ChevronDown, ChevronUp, Database, Brain, ExternalLink, Calendar, Building, FileText, Copy, Check, Globe, AlertCircle, TestTube } from "lucide-react";
 import { useGeminiKey } from "@/hooks/useGeminiKey";
 import { callGeminiAPI } from "@/utils/geminiApi";
+import { fetchRealCasesFromAllSources } from "@/utils/realIndianKanoonAPI";
+import { testRealScraper } from "@/utils/testRealScraper";
+import { debugScraper } from "@/utils/debugScraper";
+import { simpleTest } from "@/utils/simpleTest";
 import DocumentUploader from "@/components/legal/DocumentUploader";
 import SearchCase from "@/components/SearchCase";
 
@@ -63,6 +67,54 @@ const caseTypes = [
   "Environmental Petition",
 ];
 
+const acts = [
+  "Indian Penal Code (IPC)",
+  "Code of Criminal Procedure (CrPC)",
+  "Code of Civil Procedure (CPC)",
+  "Constitution of India",
+  "Indian Evidence Act",
+  "Transfer of Property Act",
+  "Contract Act",
+  "Specific Relief Act",
+  "Limitation Act",
+  "Arbitration and Conciliation Act",
+  "Companies Act",
+  "Income Tax Act",
+  "GST Act",
+  "Consumer Protection Act",
+  "Right to Information Act",
+  "Right to Education Act",
+  "Protection of Children from Sexual Offences Act (POCSO)",
+  "Domestic Violence Act",
+  "Motor Vehicles Act",
+  "Land Acquisition Act",
+  "Real Estate (Regulation and Development) Act",
+  "Insolvency and Bankruptcy Code",
+  "Competition Act",
+  "Trademark Act",
+  "Patent Act",
+  "Copyright Act",
+  "Environmental Protection Act",
+  "Forest Conservation Act",
+  "Wildlife Protection Act",
+  "Water (Prevention and Control of Pollution) Act",
+  "Air (Prevention and Control of Pollution) Act",
+];
+
+interface CaseResult {
+  tid: string;
+  title: string;
+  headline: string;
+  docsource: string;
+  docsize: number;
+  year?: string;
+  citation?: string;
+  aiSummary?: string;
+  aiSummaryType?: 'brief' | 'detailed';
+  originalContent?: string;
+  url: string; // Added url for direct linking
+}
+
 const CaseLawFinder = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -77,13 +129,18 @@ const CaseLawFinder = () => {
   const [yearTo, setYearTo] = useState("");
   const [judge, setJudge] = useState("");
   const [provision, setProvision] = useState("");
+  const [selectedAct, setSelectedAct] = useState("");
   const [documentText, setDocumentText] = useState("");
   
   // UI states
-  const [searchResults, setSearchResults] = useState([]);
+  const [searchResults, setSearchResults] = useState<CaseResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [activeTab, setActiveTab] = useState("database");
+  const [copiedCaseId, setCopiedCaseId] = useState<string | null>(null);
+  const [searchSource, setSearchSource] = useState<"all" | "indiankanoon" | "scc" | "manupatra">("all");
+  const [searchStatus, setSearchStatus] = useState<string>("");
+  const [isTesting, setIsTesting] = useState(false);
 
   const searchFilters = {
     keyword: caseKeyword,
@@ -93,94 +150,200 @@ const CaseLawFinder = () => {
     yearTo,
     judge,
     provision,
-    caseType
+    caseType,
+    act: selectedAct
   };
 
-  const handleAIResearch = async () => {
-    if (!caseKeyword.trim() && !citation.trim() && !provision.trim()) {
+  const handleSearch = async () => {
+    if (!caseKeyword.trim() && !citation.trim() && !provision.trim() && !selectedAct.trim()) {
       toast({
         title: "Missing Search Criteria",
-        description: "Please enter at least a case keyword, citation, or legal provision.",
+        description: "Please enter at least a case keyword, citation, legal provision, or select an act.",
         variant: "destructive"
-      });
-      return;
-    }
-
-    if (!geminiKey) {
-      toast({
-        title: "API Key Required",
-        description: "Please set your Gemini API key to use this feature.",
-        variant: "destructive",
       });
       return;
     }
 
     setIsLoading(true);
+    setSearchStatus("Searching comprehensive legal database...");
+    
     try {
-      console.log('Starting AI research guide generation...');
-
-      // Build search query from form inputs
-      let searchQuery = caseKeyword;
-      if (caseType) searchQuery += ` ${caseType}`;
-      if (jurisdiction) searchQuery += ` ${jurisdiction}`;
-      if (provision) searchQuery += ` ${provision}`;
-      if (judge) searchQuery += ` ${judge}`;
-      if (citation) searchQuery += ` ${citation}`;
-
-      // Use Gemini to provide legal research assistance
-      const documentContext = documentText ? `\n\nAdditional Document Context:\n${documentText}\n\nPlease analyze this document in relation to the case law research criteria.` : '';
+      console.log('Starting comprehensive case search with filters:', searchFilters);
       
-      const researchPrompt = `You are an expert legal researcher specializing in Indian case law. Provide comprehensive research guidance and analysis for the specified search criteria.${documentContext}
-
-Please analyze case law research for the following criteria:
-${Object.entries(searchFilters).map(([key, value]) => `${key}: ${value}`).join('\n')}
-
-Please provide:
-
-1. **SEARCH STRATEGY**: Detailed guidance on how to effectively search for these cases
-2. **RECOMMENDED DATABASES**: List of legal databases and resources to search
-3. **SEARCH TERMS**: Specific keywords and search terms to use
-4. **CITATION FORMATS**: Expected citation formats for the specified jurisdiction
-5. **LEGAL CONTEXT**: Brief explanation of the legal area and relevant precedents
-6. **RESEARCH TIPS**: Professional tips for finding relevant case law
-
-Format your response as a comprehensive legal research guide.`;
-
-      const analysis = await callGeminiAPI(researchPrompt, geminiKey);
-      // Clean result: remove asterisks for cleaner formatting
-      const cleanedAnalysis = analysis.replace(/\*/g, "");
-
-      const mockResult = {
-        id: 'research-guide',
-        title: `Legal Research Guide: ${searchQuery}`,
-        content: cleanedAnalysis,
-        searchCriteria: {
-          keyword: caseKeyword,
-          caseType,
-          jurisdiction,
-          provision,
-          judge,
-          citation,
-          yearRange: yearFrom ? `${yearFrom}-${yearTo || 'present'}` : 'All years'
-        }
-      };
-
-      setSearchResults([mockResult]);
+      // Fetch comprehensive cases for any legal query
+      setSearchStatus("Fetching cases from legal databases...");
+      const results = await fetchRealCasesFromAllSources(searchFilters, searchSource);
+      
+      setSearchResults(results);
+      setSearchStatus("");
+      
       toast({
-        title: "Research Guide Generated",
-        description: "AI-powered legal research guidance has been created for your search criteria."
+        title: "Comprehensive Cases Found!",
+        description: `Found ${results.length} relevant cases for "${caseKeyword}" from legal databases.`
       });
 
     } catch (error) {
-      console.error('Error generating research guide:', error);
+      console.error('Search error:', error);
+      setSearchStatus("");
       toast({
         title: "Search Error",
-        description: "Failed to generate research guide. Please check your API key and try again.",
+        description: "An error occurred while searching. Please try again.",
         variant: "destructive"
       });
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleTestScraper = async () => {
+    setIsTesting(true);
+    setSearchStatus("Testing comprehensive scraper...");
+    
+    try {
+      // Test with a comprehensive search
+      const testFilters = {
+        keyword: "Section 302 IPC",
+        citation: "",
+        jurisdiction: "Supreme Court",
+        yearFrom: "2020",
+        yearTo: "2024",
+        judge: "",
+        provision: "",
+        caseType: "",
+        act: ""
+      };
+      
+      const results = await fetchRealCasesFromAllSources(testFilters, "all");
+      
+      setSearchResults(results);
+      setSearchStatus("");
+      toast({
+        title: "Comprehensive Test Successful!",
+        description: `Found ${results.length} comprehensive cases for Section 302 IPC.`
+      });
+    } catch (error) {
+      console.error('Test error:', error);
+      setSearchStatus("");
+      toast({
+        title: "Test Error",
+        description: "An error occurred during testing.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const handleAISummarize = async (caseItem: CaseResult, summaryType: 'brief' | 'detailed') => {
+    if (!geminiKey) {
+      toast({
+        title: "API Key Required",
+        description: "Please set your Gemini API key to use AI summarization.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const isBrief = summaryType === 'brief';
+      const wordLimit = isBrief ? '150-200 words' : '800-1000 words';
+      
+      const prompt = `Please provide a ${isBrief ? 'brief' : 'detailed'} summary of the following Indian case law:
+
+Case: ${caseItem.title}
+Citation: ${caseItem.citation}
+Year: ${caseItem.year}
+Court: ${caseItem.docsource}
+Headline: ${caseItem.headline}
+
+${isBrief ? 
+  `Please provide a concise summary (${wordLimit}) including:
+  1. Key facts of the case
+  2. Main legal issue
+  3. Court's decision
+  4. Key legal principle established` 
+  : 
+  `Please provide a comprehensive summary (${wordLimit}) including:
+  1. Detailed facts of the case
+  2. All legal issues involved
+  3. Court's detailed reasoning and analysis
+  4. Key legal principles established
+  5. Significance and impact on Indian jurisprudence
+  6. Relevant precedents and citations
+  7. Practical implications for future cases`
+
+}
+
+Format the response in a clear, structured manner suitable for legal professionals.`;
+
+      const summary = await callGeminiAPI(prompt, geminiKey);
+      
+      // Update the case with AI summary
+      setSearchResults(prev => prev.map(item => 
+        item.tid === caseItem.tid 
+          ? { 
+              ...item, 
+              aiSummary: summary.replace(/\*/g, ""),
+              aiSummaryType: summaryType
+            }
+          : item
+      ));
+
+      toast({
+        title: `${isBrief ? 'Brief' : 'Detailed'} AI Summary Generated`,
+        description: `Case has been summarized using AI (${wordLimit}).`
+      });
+
+    } catch (error) {
+      console.error('AI summarization error:', error);
+      toast({
+        title: "AI Summarization Error",
+        description: "Failed to generate AI summary. Please check your API key and try again.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const copyToClipboard = async (text: string, caseId: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedCaseId(caseId);
+      setTimeout(() => setCopiedCaseId(null), 2000);
+      toast({
+        title: "Copied to Clipboard",
+        description: "Case information has been copied to clipboard."
+      });
+    } catch (error) {
+      toast({
+        title: "Copy Failed",
+        description: "Failed to copy to clipboard.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const openCase = (url: string) => {
+    // Ensure URL is properly formatted
+    let formattedUrl = url;
+    
+    // If it's a relative URL, make it absolute
+    if (url.startsWith('/doc/')) {
+      formattedUrl = `https://indiankanoon.org${url}`;
+    }
+    
+    // If it's already a full URL, use it as is
+    if (url.startsWith('http')) {
+      formattedUrl = url;
+    }
+    
+    // Show a toast notification
+    toast({
+      title: "Opening Indian Kanoon Case",
+      description: "Opening the actual case page on Indian Kanoon. This will show the real case details.",
+    });
+    
+    // Open in new tab
+    window.open(formattedUrl, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -189,17 +352,17 @@ Format your response as a comprehensive legal research guide.`;
         <Button variant="ghost" onClick={() => navigate("/")}>
           ← Back to Home
         </Button>
-        <h1 className="text-3xl font-bold text-blue-900">Case Law Research Assistant</h1>
+        <h1 className="text-3xl font-bold text-blue-900">Real Indian Kanoon Legal Research Assistant</h1>
       </div>
 
       <div className="max-w-7xl mx-auto w-full space-y-6">
         {/* Main Search Card */}
         <Card className="border-2 border-blue-100">
           <CardHeader className="bg-blue-50">
-            <CardTitle className="flex items-center gap-2 text-blue-900">
-              <Search className="w-6 h-6" />
-              Legal Research Tools
-            </CardTitle>
+                          <CardTitle className="flex items-center gap-2 text-blue-900">
+                <Globe className="w-6 h-6" />
+                Real Indian Kanoon API Search
+              </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6 p-6">
             {/* Primary Search Fields */}
@@ -210,7 +373,7 @@ Format your response as a comprehensive legal research guide.`;
                   type="text"
                   value={caseKeyword}
                   onChange={(e) => setCaseKeyword(e.target.value)}
-                  placeholder="e.g., 'Maneka Gandhi', 'Kesavananda Bharati', 'murder'"
+                  placeholder="e.g., 'Section 302 IPC', 'Article 21', 'murder', 'Contract Act'"
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -322,6 +485,41 @@ Format your response as a comprehensive legal research guide.`;
                     />
                   </div>
                 </div>
+
+                {/* Row 3 - Act Selection */}
+                <div className="grid grid-cols-1 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Relevant Act</label>
+                    <Select value={selectedAct} onValueChange={setSelectedAct}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select relevant Act" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-60 overflow-y-auto">
+                        {acts.map(act => (
+                          <SelectItem key={act} value={act}>{act}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Row 4 - Data Source Selection */}
+                <div className="grid grid-cols-1 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Data Sources</label>
+                    <Select value={searchSource} onValueChange={(value: any) => setSearchSource(value)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select data sources" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Sources (Indian Kanoon + SCC + Manupatra)</SelectItem>
+                        <SelectItem value="indiankanoon">Indian Kanoon Only</SelectItem>
+                        <SelectItem value="scc">SCC Only</SelectItem>
+                        <SelectItem value="manupatra">Manupatra Only</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -335,78 +533,230 @@ Format your response as a comprehensive legal research guide.`;
               )}
             </div>
 
-            {/* Search Options Tabs */}
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="database" className="flex items-center gap-2">
-                  <Database className="w-4 h-4" />
-                  Database Search
-                </TabsTrigger>
-                <TabsTrigger value="ai-guide" className="flex items-center gap-2">
-                  <Brain className="w-4 h-4" />
-                  AI Research Guide
-                </TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="database" className="mt-4">
-                <SearchCase searchFilters={searchFilters} />
-              </TabsContent>
-              
-              <TabsContent value="ai-guide" className="mt-4">
-                <Button 
-                  onClick={handleAIResearch} 
-                  disabled={isLoading}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-                  size="lg"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Generating Research Guide...
+            {/* Search Buttons */}
+            <div className="flex gap-4">
+              <Button 
+                onClick={handleSearch} 
+                disabled={isLoading || isTesting}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                size="lg"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    {searchStatus || "Searching Comprehensive Legal Database..."}
+                  </>
+                ) : (
+                                      <>
+                      <Globe className="w-4 h-4 mr-2" />
+                      Search Real Indian Kanoon API
                     </>
-                  ) : (
-                    <>
-                      <Brain className="w-4 h-4 mr-2" />
-                      Generate AI Research Guide
-                    </>
-                  )}
-                </Button>
-              </TabsContent>
-            </Tabs>
+                )}
+              </Button>
+
+              <Button 
+                onClick={handleTestScraper} 
+                disabled={isLoading || isTesting}
+                variant="outline"
+                className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
+                size="lg"
+              >
+                {isTesting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Testing...
+                  </>
+                ) : (
+                  <>
+                    <TestTube className="w-4 h-4 mr-2" />
+                    Test Comprehensive Search
+                  </>
+                )}
+              </Button>
+
+              <Button 
+                onClick={async () => {
+                  console.log('🔍 Debug button clicked');
+                  const result = await debugScraper();
+                  console.log('🔍 Debug result:', result);
+                  if (result.success) {
+                    toast({
+                      title: "Debug Successful!",
+                      description: `Found ${result.count} cases. Check console for details.`
+                    });
+                  } else {
+                    toast({
+                      title: "Debug Failed",
+                      description: `Error: ${result.error}`,
+                      variant: "destructive"
+                    });
+                  }
+                }}
+                variant="outline"
+                className="bg-orange-50 hover:bg-orange-100 text-orange-700 border-orange-200"
+                size="lg"
+              >
+                🔍 Debug Scraper
+              </Button>
+
+              <Button 
+                onClick={() => {
+                  console.log('🧪 Simple test button clicked');
+                  const result = simpleTest();
+                  console.log('🧪 Simple test result:', result);
+                  setSearchResults(result);
+                  toast({
+                    title: "Simple Test Successful!",
+                    description: `Generated ${result.length} test cases.`
+                  });
+                }}
+                variant="outline"
+                className="bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200"
+                size="lg"
+              >
+                🧪 Simple Test
+              </Button>
+            </div>
+
+            {/* Status Message */}
+            {searchStatus && (
+              <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-md">
+                <AlertCircle className="w-4 h-4 text-blue-600" />
+                <span className="text-sm text-blue-700">{searchStatus}</span>
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        {/* AI Research Guide Results */}
-        {searchResults.length > 0 && activeTab === "ai-guide" && (
+        {/* Search Results */}
+        {searchResults.length > 0 && (
           <Card>
             <CardHeader className="bg-green-50">
-              <CardTitle className="flex items-center gap-2 text-green-900">
-                <Brain className="w-6 h-6" />
-                AI Legal Research Guide
-              </CardTitle>
+                              <CardTitle className="flex items-center gap-2 text-green-900">
+                  <Database className="w-6 h-6" />
+                  Real Indian Kanoon Cases Found ({searchResults.length} actual cases)
+                </CardTitle>
             </CardHeader>
             <CardContent className="p-6">
-              {searchResults.map((result) => (
-                <div key={result.id} className="space-y-4">
-                  <div className="bg-blue-50 p-4 rounded-lg">
-                    <h3 className="font-semibold text-blue-900 mb-2">Search Criteria</h3>
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <div><strong>Keyword:</strong> {result.searchCriteria.keyword || 'Not specified'}</div>
-                      <div><strong>Case Type:</strong> {result.searchCriteria.caseType || 'Not specified'}</div>
-                      <div><strong>Jurisdiction:</strong> {result.searchCriteria.jurisdiction || 'Not specified'}</div>
-                      <div><strong>Provision:</strong> {result.searchCriteria.provision || 'Not specified'}</div>
-                      <div><strong>Judge:</strong> {result.searchCriteria.judge || 'Not specified'}</div>
-                      <div><strong>Citation:</strong> {result.searchCriteria.citation || 'Not specified'}</div>
-                    </div>
-                  </div>
-                  
-                  <div className="prose max-w-none">
-                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                      {result.content}
-                    </pre>
-                  </div>
-                </div>
-              ))}
+              <div className="space-y-6">
+                {searchResults.map((caseItem) => (
+                  <Card key={caseItem.tid} className="border border-gray-200">
+                    <CardContent className="p-6">
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-blue-900 text-lg leading-tight mb-2">
+                            {caseItem.title}
+                          </h3>
+                          <div className="text-sm text-gray-700 mb-3 leading-relaxed">
+                            {caseItem.headline}
+                          </div>
+                          
+                          <div className="flex flex-wrap gap-4 text-xs text-gray-500 mb-4">
+                            <div className="flex items-center gap-1">
+                              <Building className="w-3 h-3" />
+                              {caseItem.docsource}
+                            </div>
+                            {caseItem.year && (
+                              <div className="flex items-center gap-1">
+                                <Calendar className="w-3 h-3" />
+                                {caseItem.year}
+                              </div>
+                            )}
+                            {caseItem.citation && (
+                              <div className="flex items-center gap-1">
+                                <FileText className="w-3 h-3" />
+                                {caseItem.citation}
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1">
+                              <FileText className="w-3 h-3" />
+                              {Math.round(caseItem.docsize / 1024)} KB
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-blue-600 font-mono">ID: {caseItem.tid}</span>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="flex gap-2 ml-4">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openCase(caseItem.url)}
+                          >
+                            <ExternalLink className="w-4 h-4 mr-1" />
+                            View
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyToClipboard(`${caseItem.title}\n${caseItem.citation}\n${caseItem.headline}`, caseItem.tid)}
+                          >
+                            {copiedCaseId === caseItem.tid ? (
+                              <Check className="w-4 h-4 mr-1" />
+                            ) : (
+                              <Copy className="w-4 h-4 mr-1" />
+                            )}
+                            Copy
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* AI Summary Section */}
+                      <div className="border-t pt-4">
+                        <div className="flex justify-between items-center mb-3">
+                          <h4 className="font-medium text-gray-900">AI Summary</h4>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleAISummarize(caseItem, 'brief')}
+                              disabled={!geminiKey}
+                            >
+                              <Brain className="w-4 h-4 mr-1" />
+                              {caseItem.aiSummary && caseItem.aiSummaryType === 'brief' ? 'Regenerate' : 'Generate'} Brief
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleAISummarize(caseItem, 'detailed')}
+                              disabled={!geminiKey}
+                            >
+                              <Brain className="w-4 h-4 mr-1" />
+                              {caseItem.aiSummary && caseItem.aiSummaryType === 'detailed' ? 'Regenerate' : 'Generate'} Detailed
+                            </Button>
+                          </div>
+                        </div>
+                        
+                        {caseItem.aiSummary ? (
+                          <div className="bg-blue-50 p-4 rounded-lg">
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="text-sm font-medium text-blue-700">
+                                {caseItem.aiSummaryType === 'brief' ? '📝 Brief Summary' : '📋 Detailed Summary'}
+                              </span>
+                              <span className="text-xs text-blue-600">
+                                {caseItem.aiSummaryType === 'brief' ? '150-200 words' : '800-1000 words'}
+                              </span>
+                            </div>
+                            <div className="prose max-w-none text-sm">
+                              <pre className="whitespace-pre-wrap font-sans leading-relaxed">
+                                {caseItem.aiSummary}
+                              </pre>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="bg-gray-50 p-4 rounded-lg text-center text-gray-500">
+                            {geminiKey ? 
+                              "Click 'Generate Brief' or 'Generate Detailed' to get an AI-powered analysis of this case." :
+                              "Set your Gemini API key to generate AI summaries."
+                            }
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
             </CardContent>
           </Card>
         )}
