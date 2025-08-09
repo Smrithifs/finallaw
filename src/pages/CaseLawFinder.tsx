@@ -165,10 +165,20 @@ const CaseLawFinder = () => {
     setSearchStatus("Fetching real cases from Indian Kanoon...");
 
     try {
+      // Log the search filters for debugging
+      console.log('Search filters:', searchFilters);
+      
+      // Ensure jurisdiction is properly formatted for the API
+      const formattedFilters = {
+        ...searchFilters,
+        // Format jurisdiction for the API if it's selected
+        jurisdiction: jurisdiction ? jurisdiction.trim() : ""
+      };
+      
       const resp = await fetch('http://localhost:8787/ik/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filters: searchFilters, pagenum: 0 })
+        body: JSON.stringify({ filters: formattedFilters, pagenum: 0 })
       });
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();
@@ -220,23 +230,27 @@ Headline: ${caseItem.headline}
 
 ${isBrief ? 
   `Please provide a concise summary (${wordLimit}) including:
-  1. Key facts of the case
-  2. Main legal issue
-  3. Court's decision
-  4. Key legal principle established` 
+  1. Full citation with year and court
+  2. Key facts of the case
+  3. Main legal issue
+  4. Court's decision
+  5. Ratio decidendi (the legal principle or reasoning behind the decision)
+  6. Year of judgment` 
   : 
   `Please provide a comprehensive summary (${wordLimit}) including:
-  1. Detailed facts of the case
-  2. All legal issues involved
-  3. Court's detailed reasoning and analysis
-  4. Key legal principles established
-  5. Significance and impact on Indian jurisprudence
-  6. Relevant precedents and citations
-  7. Practical implications for future cases`
+  1. Full citation with year and court
+  2. Detailed facts of the case
+  3. All legal issues involved
+  4. Court's detailed reasoning and analysis
+  5. Ratio decidendi (the legal principle or reasoning behind the decision)
+  6. Significance and impact on Indian jurisprudence
+  7. Relevant precedents and citations
+  8. Practical implications for future cases
+  9. Year of judgment`
 
 }
 
-Format the response in a clear, structured manner suitable for legal professionals.`;
+Format the response in a clear, structured manner suitable for legal professionals. ALWAYS include the citation, ratio decidendi, and year of judgment prominently in your summary.`;
 
       const summary = await callGeminiAPI(prompt, geminiKey);
       
@@ -465,23 +479,7 @@ Format the response in a clear, structured manner suitable for legal professiona
                   </div>
                 </div>
 
-                {/* Row 4 - Data Source Selection */}
-                <div className="grid grid-cols-1 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Data Sources</label>
-                    <Select value={searchSource} onValueChange={(value: any) => setSearchSource(value)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select data sources" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Sources (Indian Kanoon + SCC + Manupatra)</SelectItem>
-                        <SelectItem value="indiankanoon">Indian Kanoon Only</SelectItem>
-                        <SelectItem value="scc">SCC Only</SelectItem>
-                        <SelectItem value="manupatra">Manupatra Only</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
+                    {/* Data Sources section removed as requested */}
 
                 {/* Credentials are now handled automatically by the server */}
               </div>

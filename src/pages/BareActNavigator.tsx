@@ -110,30 +110,81 @@ Structure this as a navigation guide for legal practitioners.`;
       return;
     }
 
-    if (!geminiKey) {
-      toast({
-        title: "API Key Required",
-        description: "Please set your Gemini API key to use this feature.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     setIsCaseLoading(true);
     try {
-      let courtFilter = "";
-      if (courtLevel && specificCourt) {
-        courtFilter = ` decided by ${specificCourt}`;
-      } else if (courtLevel) {
-        courtFilter = ` from ${courtLevel}`;
+      // First, search for real cases using Indian Kanoon API
+      const searchQuery = `${actName} section ${sectionNumber}`;
+      
+      // Prepare filters for the API
+      const filters = {
+        keyword: searchQuery,
+        citation: "",
+        jurisdiction: specificCourt || (courtLevel === "Supreme Court" ? "Supreme Court" : 
+                     courtLevel === "High Court" ? "High Courts" : ""),
+        yearFrom: searchYear ? searchYear.split("-")[0] : "",
+        yearTo: searchYear ? (searchYear.includes("-") ? searchYear.split("-")[1] : searchYear) : "",
+        judge: "",
+        provision: `section ${sectionNumber}`,
+        caseType: "",
+        act: actName
+      };
+      
+      console.log('Searching Indian Kanoon with filters:', filters);
+      
+      // Call the Indian Kanoon API through our proxy
+      const resp = await fetch('http://localhost:8787/ik/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filters, pagenum: 0 })
+      });
+      
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      
+      if (!data?.success || !Array.isArray(data?.results)) {
+        throw new Error('Unexpected proxy response');
       }
+      
+      // If we have real cases, use them
+      if (data.results.length > 0) {
+        // Format the results for display
+        const casesText = data.results.map((caseItem: any) => {
+          return `📌 **${caseItem.title}**\n📜 Citation: ${caseItem.citation || 'Not available'}\n⚖️ Court: ${caseItem.docsource}\n📅 Year: ${caseItem.year || 'Not available'}\n\n${caseItem.headline}\n\n`;
+        }).join('---\n\n');
+        
+        // Set the results
+        setCaseResults(`# Real Cases Found for Section ${sectionNumber} of ${actName}\n\n${casesText}\n\n*These are real cases from Indian Kanoon that cite or interpret this section.*`);
+        
+        toast({
+          title: "Real Cases Found",
+          description: `Found ${data.results.length} real cases from Indian Kanoon.`
+        });
+      } else {
+        // If no real cases found, fall back to AI-generated analysis if Gemini key is available
+        if (!geminiKey) {
+          toast({
+            title: "No Cases Found",
+            description: "No cases found for this section. Set your Gemini API key to get AI analysis.",
+            variant: "destructive",
+          });
+          setCaseResults(`No real cases found for Section ${sectionNumber} of ${actName}.`);
+          return;
+        }
+        
+        // Use Gemini for analysis when no real cases are found
+        let courtFilter = "";
+        if (courtLevel && specificCourt) {
+          courtFilter = ` decided by ${specificCourt}`;
+        } else if (courtLevel) {
+          courtFilter = ` from ${courtLevel}`;
+        }
 
-      let yearFilter = "";
-      if (searchYear) {
-        yearFilter = ` from the year ${searchYear}`;
-      }
+        let yearFilter = "";
+        if (searchYear) {
+          yearFilter = ` from the year ${searchYear}`;
+        }
 
-      const prompt = `You are a legal research assistant specializing in Indian case law. Find relevant cases that have cited or interpreted Section ${sectionNumber} of the ${actName}.
+        const prompt = `You are a legal research assistant specializing in Indian case law. Find relevant cases that have cited or interpreted Section ${sectionNumber} of the ${actName}.
 
 Search for Indian case law${courtFilter}${yearFilter} that has cited, interpreted, or applied Section ${sectionNumber} of the ${actName}.
 
@@ -146,15 +197,18 @@ Please provide:
 
 Focus on cases that specifically deal with Section ${sectionNumber} of the ${actName}.`;
 
-      const result = await callGeminiAPI(prompt, geminiKey);
+        console.log('No real cases found, calling Gemini API for case analysis');
+        const result = await callGeminiAPI(prompt, geminiKey);
 
-      setCaseResults(result);
-      toast({
-        title: "Case Search Complete",
-        description: "Case analysis generated using AI research"
-      });
+        setCaseResults(result);
+        toast({
+          title: "AI Analysis Generated",
+          description: "No real cases found. Generated AI analysis instead."
+        });
+      }
     } catch (error) {
       console.error('Error searching cases:', error);
+      setCaseResults("");
       toast({
         title: "Error",
         description: "Failed to search cases. Please try again.",
