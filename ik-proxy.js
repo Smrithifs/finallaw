@@ -12,24 +12,45 @@ try {
   const dotenvPath = '.env.local';
   if (existsSync(dotenvPath)) {
     const envText = readFileSync(dotenvPath, 'utf8');
-    envText.split(/\r?\n/).forEach(line => {
-      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
-      if (m) {
-        const key = m[1];
-        let val = m[2];
-        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith('\'') && val.endsWith('\''))) {
-          val = val.slice(1, -1);
-        }
-        if (!process.env[key]) process.env[key] = val;
-      }
-    });
+    
+    // Extract IK_EMAIL
+    const emailMatch = envText.match(/IK_EMAIL=([^\n]+)/);
+    if (emailMatch && !process.env.IK_EMAIL) {
+      process.env.IK_EMAIL = emailMatch[1].trim();
+    }
+    
+    // Extract IK_PRIVATE_KEY (multiline) - capture everything from IK_PRIVATE_KEY= to the end of file or next variable
+    // First, get the position of IK_PRIVATE_KEY=
+    const privateKeyPos = envText.indexOf('IK_PRIVATE_KEY=');
+    if (privateKeyPos !== -1 && !process.env.IK_PRIVATE_KEY) {
+      // Get everything after IK_PRIVATE_KEY=
+      const privateKeySection = envText.substring(privateKeyPos + 'IK_PRIVATE_KEY='.length);
+      // Find the next variable declaration or use the end of the file
+      const nextVarPos = privateKeySection.search(/\n[A-Z_]+=/);
+      const privateKey = nextVarPos !== -1 ? 
+        privateKeySection.substring(0, nextVarPos).trim() : 
+        privateKeySection.trim();
+      
+      process.env.IK_PRIVATE_KEY = privateKey;
+      console.log('Loaded private key from .env.local, length:', privateKey.length);
+      console.log('Private key starts with:', privateKey.substring(0, 30));
+      console.log('Private key ends with:', privateKey.substring(privateKey.length - 30));
+    }
   }
-} catch {}
+} catch (err) {
+  console.error('Error loading .env.local:', err);
+}
 
 const IK_EMAIL = process.env.IK_EMAIL || process.env.INDIAN_KANOON_EMAIL || '';
 const IK_PRIVATE_KEY = process.env.IK_PRIVATE_KEY || process.env.INDIAN_KANOON_PRIVATE_KEY || '';
 
+console.log('IK_EMAIL:', IK_EMAIL);
+console.log('IK_PRIVATE_KEY length:', IK_PRIVATE_KEY.length);
+console.log('IK_PRIVATE_KEY starts with:', IK_PRIVATE_KEY.substring(0, 30));
+console.log('IK_PRIVATE_KEY ends with:', IK_PRIVATE_KEY.substring(IK_PRIVATE_KEY.length - 30));
+
 function sendJson(res, status, body) {
+  console.log(`Sending response with status ${status}:`, body);
   res.writeHead(status, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
@@ -63,11 +84,30 @@ function base64(buffer) {
   return Buffer.from(buffer).toString('base64');
 }
 
-function signMessage(privatePem, message) {
-  const signer = createSign('RSA-SHA256');
-  signer.update(message);
-  signer.end();
-  return signer.sign(privatePem);
+async function signMessage(privatePem, message) {
+  try {
+    console.log('Signing message with private key');
+    console.log('Private key type:', typeof privatePem);
+    console.log('Private key length:', privatePem.length);
+    
+    // Try to parse the key with crypto's built-in functions
+    try {
+      const { createPrivateKey } = await import('node:crypto');
+      const key = createPrivateKey(privatePem);
+      console.log('Successfully created private key object');
+      
+      const signer = createSign('RSA-SHA256');
+      signer.update(message);
+      signer.end();
+      return signer.sign(key);
+    } catch (keyError) {
+      console.error('Error creating private key object:', keyError);
+      throw keyError;
+    }
+  } catch (error) {
+    console.error('Error signing message:', error);
+    throw error;
+  }
 }
 
 function doIkRequest(url, headers) {
@@ -102,7 +142,9 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && req.url === '/ik/search') {
     try {
+      console.log('Received search request');
       if (!IK_EMAIL || !IK_PRIVATE_KEY) {
+        console.log('Missing IK_EMAIL or IK_PRIVATE_KEY');
         return sendJson(res, 400, { error: 'IK_EMAIL and IK_PRIVATE_KEY must be set in environment or .env.local' });
       }
       const { filters, pagenum = 0 } = await parseBody(req);
@@ -113,7 +155,7 @@ const server = http.createServer(async (req, res) => {
       const unique = `${apiUrl}|${Date.now()}|${Math.random().toString(36).slice(2)}`;
       const messageBytes = Buffer.from(unique, 'utf8');
       const encodedMessage = base64(messageBytes);
-      const signature = signMessage(IK_PRIVATE_KEY, messageBytes);
+      const signature = await signMessage(IK_PRIVATE_KEY, messageBytes);
       const encodedSignature = base64(signature);
 
       const headers = {
@@ -137,6 +179,7 @@ const server = http.createServer(async (req, res) => {
 
       return sendJson(res, 200, { success: true, count: results.length, results });
     } catch (e) {
+      console.error('Proxy error:', e);
       return sendJson(res, 500, { error: 'Proxy error', message: String(e?.message || e) });
     }
   }
