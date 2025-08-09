@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -8,7 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, Search, Filter, ChevronDown, ChevronUp, Database, Brain, ExternalLink, Calendar, Building, FileText, Copy, Check, Globe, AlertCircle, TestTube } from "lucide-react";
 import { useGeminiKey } from "@/hooks/useGeminiKey";
 import { callGeminiAPI } from "@/utils/geminiApi";
-import { fetchRealCasesFromAllSources } from "@/utils/realIndianKanoonAPI";
+// Removed client-side API import for case fetching; we'll call the server function directly
 import { testRealScraper } from "@/utils/testRealScraper";
 import { debugScraper } from "@/utils/debugScraper";
 import { simpleTest } from "@/utils/simpleTest";
@@ -120,6 +120,29 @@ const CaseLawFinder = () => {
   const { toast } = useToast();
   const { data: geminiKey } = useGeminiKey();
   
+  // IK credentials (persisted in localStorage)
+  const [ikEmail, setIkEmail] = useState<string>("");
+  const [ikPrivatePem, setIkPrivatePem] = useState<string>("");
+
+  useEffect(() => {
+    try {
+      const savedEmail = localStorage.getItem("ik_customer_email") || "";
+      const savedPem = localStorage.getItem("ik_private_pem") || "";
+      setIkEmail(savedEmail);
+      setIkPrivatePem(savedPem);
+    } catch {}
+  }, []);
+
+  const handleSaveIkCreds = () => {
+    try {
+      localStorage.setItem("ik_customer_email", ikEmail.trim());
+      localStorage.setItem("ik_private_pem", ikPrivatePem.trim());
+      toast({ title: "Saved", description: "Indian Kanoon credentials saved on this device." });
+    } catch (e) {
+      toast({ title: "Save Failed", description: "Could not save credentials.", variant: "destructive" });
+    }
+  };
+
   // Form states
   const [caseKeyword, setCaseKeyword] = useState("");
   const [citation, setCitation] = useState("");
@@ -165,31 +188,32 @@ const CaseLawFinder = () => {
     }
 
     setIsLoading(true);
-    setSearchStatus("Searching comprehensive legal database...");
-    
-    try {
-      console.log('Starting comprehensive case search with filters:', searchFilters);
-      
-      // Fetch comprehensive cases for any legal query
-      setSearchStatus("Fetching cases from legal databases...");
-      const results = await fetchRealCasesFromAllSources(searchFilters, searchSource);
-      
-      setSearchResults(results);
-      setSearchStatus("");
-      
-      toast({
-        title: "Comprehensive Cases Found!",
-        description: `Found ${results.length} relevant cases for "${caseKeyword}" from legal databases.`
-      });
+    setSearchStatus("Fetching real cases from Indian Kanoon...");
 
-    } catch (error) {
+    try {
+      // Prefer local proxy (no prompts)
+      const email = ikEmail || (import.meta as any).env?.IK_EMAIL || '';
+      const pem = ikPrivatePem || (import.meta as any).env?.IK_PRIVATE_KEY || '';
+      if (!email || !pem) {
+        throw new Error('Set your Indian Kanoon email/private key in Advanced Filters (saved locally) or via env.');
+      }
+
+      const resp = await fetch('http://localhost:8787/ik/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filters: searchFilters, pagenum: 0 })
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      if (!data?.success || !Array.isArray(data?.results)) throw new Error('Unexpected proxy response');
+
+      setSearchResults(data.results as CaseResult[]);
+      setSearchStatus("");
+      toast({ title: "Real Cases Found", description: `Found ${data.results.length} real cases from Indian Kanoon.` });
+    } catch (error: any) {
       console.error('Search error:', error);
       setSearchStatus("");
-      toast({
-        title: "Search Error",
-        description: "An error occurred while searching. Please try again.",
-        variant: "destructive"
-      });
+      toast({ title: "Search Error", description: error?.message || "Failed to fetch real cases.", variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
@@ -359,10 +383,10 @@ Format the response in a clear, structured manner suitable for legal professiona
         {/* Main Search Card */}
         <Card className="border-2 border-blue-100">
           <CardHeader className="bg-blue-50">
-                          <CardTitle className="flex items-center gap-2 text-blue-900">
+            <CardTitle className="flex items-center gap-2 text-blue-900">
                 <Globe className="w-6 h-6" />
                 Real Indian Kanoon API Search
-              </CardTitle>
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6 p-6">
             {/* Primary Search Fields */}
@@ -520,6 +544,38 @@ Format the response in a clear, structured manner suitable for legal professiona
                     </Select>
                   </div>
                 </div>
+
+                {/* Indian Kanoon Credentials Section */}
+                <div className="grid grid-cols-1 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Indian Kanoon API Credentials</label>
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-700">X-Customer Email:</span>
+                        <input
+                          type="text"
+                          value={ikEmail}
+                          onChange={(e) => setIkEmail(e.target.value)}
+                          placeholder="Enter your Indian Kanoon API email (X-Customer)"
+                          className="w-full px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-700">Private Key (PEM):</span>
+                        <textarea
+                          value={ikPrivatePem}
+                          onChange={(e) => setIkPrivatePem(e.target.value)}
+                          placeholder="Paste your PRIVATE KEY (PEM, including BEGIN/END lines)"
+                          className="w-full px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          rows={4}
+                        />
+                      </div>
+                      <Button onClick={handleSaveIkCreds} className="w-full">
+                        Save Indian Kanoon Credentials
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -535,24 +591,24 @@ Format the response in a clear, structured manner suitable for legal professiona
 
             {/* Search Buttons */}
             <div className="flex gap-4">
-              <Button 
+                <Button 
                 onClick={handleSearch} 
                 disabled={isLoading || isTesting}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-                size="lg"
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  size="lg"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     {searchStatus || "Searching Comprehensive Legal Database..."}
-                  </>
-                ) : (
-                                      <>
+                    </>
+                  ) : (
+                    <>
                       <Globe className="w-4 h-4 mr-2" />
                       Search Real Indian Kanoon API
                     </>
-                )}
-              </Button>
+                  )}
+                </Button>
 
               <Button 
                 onClick={handleTestScraper} 
@@ -632,10 +688,10 @@ Format the response in a clear, structured manner suitable for legal professiona
         {searchResults.length > 0 && (
           <Card>
             <CardHeader className="bg-green-50">
-                              <CardTitle className="flex items-center gap-2 text-green-900">
+              <CardTitle className="flex items-center gap-2 text-green-900">
                   <Database className="w-6 h-6" />
                   Real Indian Kanoon Cases Found ({searchResults.length} actual cases)
-                </CardTitle>
+              </CardTitle>
             </CardHeader>
             <CardContent className="p-6">
               <div className="space-y-6">
@@ -725,9 +781,9 @@ Format the response in a clear, structured manner suitable for legal professiona
                               <Brain className="w-4 h-4 mr-1" />
                               {caseItem.aiSummary && caseItem.aiSummaryType === 'detailed' ? 'Regenerate' : 'Generate'} Detailed
                             </Button>
-                          </div>
-                        </div>
-                        
+                    </div>
+                  </div>
+                  
                         {caseItem.aiSummary ? (
                           <div className="bg-blue-50 p-4 rounded-lg">
                             <div className="flex justify-between items-center mb-2">
@@ -741,9 +797,9 @@ Format the response in a clear, structured manner suitable for legal professiona
                             <div className="prose max-w-none text-sm">
                               <pre className="whitespace-pre-wrap font-sans leading-relaxed">
                                 {caseItem.aiSummary}
-                              </pre>
-                            </div>
-                          </div>
+                    </pre>
+                  </div>
+                </div>
                         ) : (
                           <div className="bg-gray-50 p-4 rounded-lg text-center text-gray-500">
                             {geminiKey ? 

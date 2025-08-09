@@ -34,70 +34,52 @@ const parseIndianKanoonResults = (html: string): CaseResult[] => {
   const results: CaseResult[] = [];
   
   try {
-    // Extract case links and titles using regex patterns
-    const caseLinkRegex = /<a[^>]*href="\/doc\/([^"]+)\/"[^>]*>([^<]+)<\/a>/g;
+    // Extract result blocks
     const resultDivRegex = /<div[^>]*class="result"[^>]*>([\s\S]*?)<\/div>/g;
-    const citationRegex = /(AIR\s+\d+\s+\w+\s+\d+)|((\d{4})\s+\d+\s+\w+\s+\d+)/g;
-    const yearRegex = /(\d{4})/g;
-    
-    let match;
-    let caseCount = 0;
-    const maxCases = 15;
-    
-    // Extract all result divs first
-    const resultDivs: string[] = [];
-    while ((match = resultDivRegex.exec(html)) !== null) {
-      resultDivs.push(match[1]);
+    const blocks: string[] = [];
+    let dm;
+    while ((dm = resultDivRegex.exec(html)) !== null) {
+      blocks.push(dm[1]);
     }
-    
-    // Process each result div
-    for (const div of resultDivs) {
-      if (caseCount >= maxCases) break;
-      
-      // Extract case link and title
-      const linkMatch = div.match(/<a[^>]*href="\/doc\/([^"]+)\/"[^>]*>([^<]+)<\/a>/);
-      if (!linkMatch) continue;
-      
-      const tid = linkMatch[1];
-      const title = linkMatch[2].trim();
-      
-      // Extract headline/summary
-      const headlineMatch = div.match(/<div[^>]*class="result_title"[^>]*>([^<]+)<\/div>/);
-      const headline = headlineMatch ? headlineMatch[1].trim() : "Case details available";
-      
-      // Extract citation
-      const citationMatch = div.match(citationRegex);
-      const citation = citationMatch ? citationMatch[0] : "";
-      
-      // Extract year from title or citation
-      const yearMatch = (title + " " + citation).match(yearRegex);
-      const year = yearMatch ? yearMatch[0] : "";
-      
-      // Determine court source
-      let docsource = "Supreme Court";
-      if (title.toLowerCase().includes("high court") || citation.toLowerCase().includes("hc")) {
-        docsource = "High Court";
-      } else if (title.toLowerCase().includes("supreme court") || citation.toLowerCase().includes("sc")) {
-        docsource = "Supreme Court";
-      }
-      
-      // Calculate mock docsize based on title length
-      const docsize = Math.floor(title.length * 1000) + 100000;
-      
+
+    // Process each block
+    for (const block of blocks) {
+      // Anchor with numeric TID and title in the same element
+      const anchorMatch = block.match(/<a[^>]*href="\/doc\/(\d+)\/"[^>]*>([\s\S]*?)<\/a>/);
+      if (!anchorMatch) continue;
+      const tid = anchorMatch[1];
+      const rawTitle = anchorMatch[2].replace(/<[^>]*>/g, "").trim();
+      const title = rawTitle || `Case ${tid}`;
+
+      // Headline (if present)
+      const headlineMatch = block.match(/<div[^>]*class="result_title"[^>]*>([\s\S]*?)<\/div>/);
+      const headline = headlineMatch ? headlineMatch[1].replace(/<[^>]*>/g, "").trim() : "";
+
+      // Try to infer court, year, citation within the block only
+      const citationMatch = block.match(/(AIR\s+\d+\s+\w+\s+\d+)/);
+      const citation = citationMatch ? citationMatch[1] : "";
+      const yearMatch = block.match(/\b(19\d{2}|20\d{2})\b/);
+      const year = yearMatch ? yearMatch[1] : "";
+
+      let docsource = "";
+      if (/Supreme Court/i.test(block)) docsource = "Supreme Court";
+      else if (/High Court/i.test(block)) docsource = "High Court";
+
+      const docsize = Math.max(100000, title.length * 800);
+
       results.push({
         tid,
         title,
         headline,
-        docsource,
+        docsource: docsource || "",
         docsize,
         year,
         citation,
         url: `https://indiankanoon.org/doc/${tid}/`
       });
-      
-      caseCount++;
+
+      if (results.length >= 15) break;
     }
-    
   } catch (error) {
     console.error('Error parsing Indian Kanoon results:', error);
   }
