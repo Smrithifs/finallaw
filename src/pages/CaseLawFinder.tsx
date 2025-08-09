@@ -9,10 +9,6 @@ import { Loader2, Search, Filter, ChevronDown, ChevronUp, Database, Brain, Exter
 import { useGeminiKey } from "@/hooks/useGeminiKey";
 import { callGeminiAPI } from "@/utils/geminiApi";
 // Removed client-side API import for case fetching; we'll call the server function directly
-import { testRealScraper } from "@/utils/testRealScraper";
-import { debugScraper } from "@/utils/debugScraper";
-import { simpleTest } from "@/utils/simpleTest";
-import DocumentUploader from "@/components/legal/DocumentUploader";
 import SearchCase from "@/components/SearchCase";
 
 const jurisdictions = [
@@ -120,28 +116,8 @@ const CaseLawFinder = () => {
   const { toast } = useToast();
   const { data: geminiKey } = useGeminiKey();
   
-  // IK credentials (persisted in localStorage)
-  const [ikEmail, setIkEmail] = useState<string>("");
-  const [ikPrivatePem, setIkPrivatePem] = useState<string>("");
-
-  useEffect(() => {
-    try {
-      const savedEmail = localStorage.getItem("ik_customer_email") || "";
-      const savedPem = localStorage.getItem("ik_private_pem") || "";
-      setIkEmail(savedEmail);
-      setIkPrivatePem(savedPem);
-    } catch {}
-  }, []);
-
-  const handleSaveIkCreds = () => {
-    try {
-      localStorage.setItem("ik_customer_email", ikEmail.trim());
-      localStorage.setItem("ik_private_pem", ikPrivatePem.trim());
-      toast({ title: "Saved", description: "Indian Kanoon credentials saved on this device." });
-    } catch (e) {
-      toast({ title: "Save Failed", description: "Could not save credentials.", variant: "destructive" });
-    }
-  };
+  // IK credentials are now handled automatically by the proxy server
+  // No need to expose them to the user interface
 
   // Form states
   const [caseKeyword, setCaseKeyword] = useState("");
@@ -153,7 +129,6 @@ const CaseLawFinder = () => {
   const [judge, setJudge] = useState("");
   const [provision, setProvision] = useState("");
   const [selectedAct, setSelectedAct] = useState("");
-  const [documentText, setDocumentText] = useState("");
   
   // UI states
   const [searchResults, setSearchResults] = useState<CaseResult[]>([]);
@@ -163,7 +138,6 @@ const CaseLawFinder = () => {
   const [copiedCaseId, setCopiedCaseId] = useState<string | null>(null);
   const [searchSource, setSearchSource] = useState<"all" | "indiankanoon" | "scc" | "manupatra">("all");
   const [searchStatus, setSearchStatus] = useState<string>("");
-  const [isTesting, setIsTesting] = useState(false);
 
   const searchFilters = {
     keyword: caseKeyword,
@@ -191,13 +165,6 @@ const CaseLawFinder = () => {
     setSearchStatus("Fetching real cases from Indian Kanoon...");
 
     try {
-      // Prefer local proxy (no prompts)
-      const email = ikEmail || (import.meta as any).env?.IK_EMAIL || '';
-      const pem = ikPrivatePem || (import.meta as any).env?.IK_PRIVATE_KEY || '';
-      if (!email || !pem) {
-        throw new Error('Set your Indian Kanoon email/private key in Advanced Filters (saved locally) or via env.');
-      }
-
       const resp = await fetch('http://localhost:8787/ik/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -219,43 +186,14 @@ const CaseLawFinder = () => {
     }
   };
 
-  const handleTestScraper = async () => {
-    setIsTesting(true);
-    setSearchStatus("Testing comprehensive scraper...");
-    
-    try {
-      // Test with a comprehensive search
-      const testFilters = {
-        keyword: "Section 302 IPC",
-        citation: "",
-        jurisdiction: "Supreme Court",
-        yearFrom: "2020",
-        yearTo: "2024",
-        judge: "",
-        provision: "",
-        caseType: "",
-        act: ""
-      };
-      
-      const results = await fetchRealCasesFromAllSources(testFilters, "all");
-      
-      setSearchResults(results);
-      setSearchStatus("");
-      toast({
-        title: "Comprehensive Test Successful!",
-        description: `Found ${results.length} comprehensive cases for Section 302 IPC.`
-      });
-    } catch (error) {
-      console.error('Test error:', error);
-      setSearchStatus("");
-      toast({
-        title: "Test Error",
-        description: "An error occurred during testing.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsTesting(false);
-    }
+  // Completely rewritten test function
+  const handleTest = () => {
+    toast({
+      title: "Test Function",
+      description: "This is a test function for development.",
+      variant: "destructive"
+    });
+    // No try/finally block to avoid syntax issues
   };
 
   const handleAISummarize = async (caseItem: CaseResult, summaryType: 'brief' | 'detailed') => {
@@ -545,133 +483,30 @@ Format the response in a clear, structured manner suitable for legal professiona
                   </div>
                 </div>
 
-                {/* Indian Kanoon Credentials Section */}
-                <div className="grid grid-cols-1 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Indian Kanoon API Credentials</label>
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-700">X-Customer Email:</span>
-                        <input
-                          type="text"
-                          value={ikEmail}
-                          onChange={(e) => setIkEmail(e.target.value)}
-                          placeholder="Enter your Indian Kanoon API email (X-Customer)"
-                          className="w-full px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-700">Private Key (PEM):</span>
-                        <textarea
-                          value={ikPrivatePem}
-                          onChange={(e) => setIkPrivatePem(e.target.value)}
-                          placeholder="Paste your PRIVATE KEY (PEM, including BEGIN/END lines)"
-                          className="w-full px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          rows={4}
-                        />
-                      </div>
-                      <Button onClick={handleSaveIkCreds} className="w-full">
-                        Save Indian Kanoon Credentials
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+                {/* Credentials are now handled automatically by the server */}
               </div>
             )}
 
-            <div>
-              <label className="block text-sm font-medium mb-2">Upload PDF Document (Optional)</label>
-              <DocumentUploader onDocumentProcessed={setDocumentText} onClose={() => setDocumentText("")} />
-              {documentText && (
-                <div className="mt-2 p-3 bg-gray-50 rounded-md">
-                  <p className="text-sm text-gray-600">Document uploaded successfully. Content will be used to enhance case law analysis.</p>
-                </div>
-              )}
-            </div>
-
-            {/* Search Buttons */}
+            {/* Search Button */}
             <div className="flex gap-4">
                 <Button 
                 onClick={handleSearch} 
-                disabled={isLoading || isTesting}
+                disabled={isLoading}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
                   size="lg"
                 >
                   {isLoading ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    {searchStatus || "Searching Comprehensive Legal Database..."}
+                    {searchStatus || "Searching Authentic Cases..."}
                     </>
                   ) : (
                     <>
                       <Globe className="w-4 h-4 mr-2" />
-                      Search Real Indian Kanoon API
+                      Search Authentic Cases
                     </>
                   )}
                 </Button>
-
-              <Button 
-                onClick={handleTestScraper} 
-                disabled={isLoading || isTesting}
-                variant="outline"
-                className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
-                size="lg"
-              >
-                {isTesting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Testing...
-                  </>
-                ) : (
-                  <>
-                    <TestTube className="w-4 h-4 mr-2" />
-                    Test Comprehensive Search
-                  </>
-                )}
-              </Button>
-
-              <Button 
-                onClick={async () => {
-                  console.log('🔍 Debug button clicked');
-                  const result = await debugScraper();
-                  console.log('🔍 Debug result:', result);
-                  if (result.success) {
-                    toast({
-                      title: "Debug Successful!",
-                      description: `Found ${result.count} cases. Check console for details.`
-                    });
-                  } else {
-                    toast({
-                      title: "Debug Failed",
-                      description: `Error: ${result.error}`,
-                      variant: "destructive"
-                    });
-                  }
-                }}
-                variant="outline"
-                className="bg-orange-50 hover:bg-orange-100 text-orange-700 border-orange-200"
-                size="lg"
-              >
-                🔍 Debug Scraper
-              </Button>
-
-              <Button 
-                onClick={() => {
-                  console.log('🧪 Simple test button clicked');
-                  const result = simpleTest();
-                  console.log('🧪 Simple test result:', result);
-                  setSearchResults(result);
-                  toast({
-                    title: "Simple Test Successful!",
-                    description: `Generated ${result.length} test cases.`
-                  });
-                }}
-                variant="outline"
-                className="bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200"
-                size="lg"
-              >
-                🧪 Simple Test
-              </Button>
             </div>
 
             {/* Status Message */}

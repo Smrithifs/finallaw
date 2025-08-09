@@ -166,7 +166,37 @@ const server = http.createServer(async (req, res) => {
 
       const ikJson = await doIkRequest(apiUrl, headers);
       const docs = Array.isArray(ikJson?.docs) ? ikJson.docs : [];
-      const results = docs.map(doc => ({
+      
+      // Filter for judgments only - exclude definitions of acts/sections
+      // Look for indicators of actual court judgments in the title or docsource
+      const judgmentsOnly = docs.filter(doc => {
+        const title = String(doc.title || '').toLowerCase();
+        const docsource = String(doc.docsource || '').toLowerCase();
+        const headline = String(doc.headline || '').toLowerCase();
+        
+        // Include if it's from a court and doesn't appear to be just a section definition
+        const isFromCourt = docsource.includes('court') || docsource.includes('tribunal');
+        const isJudgment = 
+          // Look for judgment indicators
+          (title.includes('vs') || title.includes('v.') || title.includes('versus') ||
+           headline.includes('petitioner') || headline.includes('appellant') ||
+           headline.includes('respondent') || headline.includes('judgment') ||
+           headline.includes('order') || headline.includes('decided on'));
+        
+        // Exclude if it looks like just a section definition
+        const isSectionDefinition = 
+          (title.match(/^section \d+/) || title.match(/^article \d+/)) &&
+          !isJudgment;
+          
+        return isFromCourt && !isSectionDefinition;
+      });
+      
+      // Add random factor to ensure different results on refresh
+      const shuffledResults = judgmentsOnly
+        .sort(() => Math.random() - 0.5)
+        .slice(0, 10);
+      
+      const results = shuffledResults.map(doc => ({
         tid: String(doc.tid),
         title: String(doc.title || ''),
         headline: String(doc.headline || ''),
